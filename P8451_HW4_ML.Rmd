@@ -19,13 +19,13 @@ Your analytic pipeline should include the following:
 
 ## 1. Data Cleaning
 
-```{r load_packages}
+```{r load_packages, echo=FALSE}
 library(ggbiplot)
 library(caret)
 ```
 
 
-```{r }
+```{r data_cleaning, message=FALSE, warning=FALSE}
 library(tidyverse)
 # Read data
 hw4data = read_csv("class4_p1.csv")
@@ -43,30 +43,11 @@ hw4data = hw4data |>
 hw4data |> Amelia::missmap(main = "Missing values vs observed")
 
 hw4data = hw4data|> 
-  drop_na()# it's necessary to make sure that directly drop NAs won't cause bias
+  select(-id) |> 
+  drop_na()
 
-
-# Finding correlated predictors
-# 1. continuous and continuous
-cont = hw4data %>%
-  select_if(is.numeric)
-correlations1 <- cor(cont, use = "complete.obs")
-high.correlations <- findCorrelation(correlations1, cutoff = 0.4) |> print()
-# There's no high correlations between continuous and continuous variables.
-
-# 2.categorical and categorical 
-library(rcompanion)
-cate = hw4data |>
-  select_if(is.factor) |> 
-  select(-id) |> mutate_all(function(x) as.numeric(x)) |> as.matrix()
-skimr::skim(cate) # there's no cell < 5, so chi-squared test is applicable
-
-cramerV(cate)
-cate
-
-
-
-
+hw4data |> Amelia::missmap(main = "Missing values vs observed")
+# it's necessary to make sure that directly drop NAs won't cause bias
 
 ```
 
@@ -76,66 +57,62 @@ cate
 # Creating balanced partitions in the data
 train.index <- createDataPartition(hw4data$healthyday, p = 0.7, list = FALSE)
 
-hcvdat.train <- hw4data[train.index, ]
-hcvdat.test <- hw4data[-train.index, ]
+train <- hw4data[train.index, ]
+test <- hw4data[-train.index, ]
 
-# Construct k-folds in your data
-train.folds <- createFolds(hw4data$healthyday, k = 10, list = FALSE)
+# I should check the independence of each variable
 ```
 
 # 3. Fit two models
 
-There are lots of methods to fit my models. I have thought about using lasso/ridge regression to do the auto-selection of predictors and handle multicollinearity. But before I do lasso/ridge regression, I need to standardize my features, which are mostly categorical variables. Standardization for nominal categorical data is different from that for continuous variable. One-hot encoding may takes too much time and it's not that plausible to do that here. So I decided to fit my linear model "statistically" and based on my knowledge.
+There are lots of methods to fit my models. I have thought about using lasso regression to do the auto-selection of predictors and handle multicollinearity. But lasso regression doesn't work well with categorical variables in terms of both feature selection and prediction accuracy. It needs One-hot encoding of the categorical data and ignore the grouping effect. However, group lasso may be a good alternative for robust feature selection although at the cost of prediction accuracy. (Lack of Robustness of Lasso and Group Lasso with Categorical Predictors: Impact of Coding
+Strategy on Variable Selection and Prediction https://escholarship.org/content/qt40b200z6/qt40b200z6_noSplash_c3819f1c49cdc6380c6ae5b0ac0af41d.pdf?t=qaj586) 
 
-```{r}
-# Conducting the bivariate analysis for model building
+Here, I would build the two models based on my knowledge.
 
-outcome <- "healthyday"
-predictors <- c("hypertension", "diabetes", "asthma", "bmi", "tobacco", "alcohol", "pa_chores_min", "pa_walk_day", "pa_self", "diet", "agegrp", "gender", "race", "nationality", "fincome")
+```{r model_training}
+# Avoid overfitting
+control = trainControl(method="repeatedcv", number=10, repeats=10, summaryFunction=defaultSummary)
 
-bivariate_results <- list()
+# Train models
+model1_train = train(healthyday ~ hypertension + pa_walk_day, data = train, method = "lm", trControl = control)
+model2_train = train(healthyday ~ hypertension + diabetes + asthma + alcohol + pa_walk_day + pa_self + diet + agegrp + race + fincome, data = train, method = "lm", trControl = control)
+```
 
-for (predictor in predictors) {
-  formula <- as.formula(paste(outcome, "~", predictor))
-  model <- lm(formula, data=hw4data) 
-  bivariate_results[[predictor]] <- summary(model)$coefficients
-}
+* model1: healthyday ~ hypertension + pa_walk_day
+* model2: healthyday ~ hypertension + diabetes + asthma + alcohol + pa_walk_day + 
+    pa_self + diet + agegrp + race + fincome
+
+# 4. Model Evaluation
+
+```{r model_evaluation}
+# Predictions for models
+predictions1 <- predict(model1_train, test)
+predictions2 <- predict(model2_train, test)
+
+# Evaluation using Mean Squared Error (MSE)
+mse1 <- mean((predictions1 - test$healthyday)**2/nrow(test))
+mse2 <- mean((predictions2 - test$healthyday)**2/nrow(test))
+
+model1_result = bind_rows(train = predictions1, test = test$healthyday, .id = "split")
+model2_result = bind_rows(train = predictions2, test = test$healthyday, .id = "split")
+result = bind_rows(model1 = model1_result, model2 = model2_result, .id = "model")
 
 
-# Start with an intercept-only model
-current_model <- lm(healthyday ~ 1, data=hw4data) 
+result = result |> 
+  mutate(residual = train - test)
 
-# Iteratively add variables based on LRT
-for (predictor in predictors) {
-  new_model_formula <- as.formula(paste("healthyday ~", paste(c(attr(current_model$formula, "rhs"), predictor), collapse = "+")))
-  new_model <- lm(new_model_formula, data=hw4data) 
-  
-  # Perform Likelihood Ratio Test
-  lr_test <- anova(current_model, new_model, test="Chisq")
-  
-  # Check if the p-value of the LRT is significant
-  if (lr_test$`Pr(>Chi)`[2] < 0.05) { 
-    current_model <- new_model
-    cat("Added", predictor, "to the model\n")
-  } else {
-    cat(predictor, "not added\n")
-  }
-}
+result |> 
+  ggplot(aes(x = model, y = residual)) + geom_violin()
 
-# Final model after adding all significant predictors
-summary(current_model)
 
 
 ```
 
-### Model Evaluation
+* Mean squared error (MSE) for model1(`r mse1`)< model2(`r mse2`), and the residual plot shows that both models have residuals that center around zero, which is good. The spread of the residuals (the range from top to bottom of the violin) seems similar for both models, suggesting that they have a similar variance in their predictions. However, it looks like Model 2 might have a slightly tighter distribution, indicating more consistent predictions. So, model2 is the preferred prediction model using MSE evaluation.
 
-```{r}
-test.outcome <- hcvdat.test %>%
-  select(-outcome.class) %>%
-  mutate(predicted = predict(lasso.3, newdata = .))
+# 5. Implementing setting
 
-confusionMatrix(test.outcome$predicted, hcvdat.test$outcome.class, positive = "LiverDisease")
-
-```
+My final model: healthyday ~ hypertension + diabetes + asthma + alcohol + pa_walk_day + 
+    pa_self + diet + agegrp + race + fincome can be used to predict the number of days in a month an individual reported having good physical health through a comprehensive evaluation of medical conditions, life habits and socioeconomic factors. This insight can guide targeted health interventions and resource allocation to improve the general well-being of the population in NYC.
 
