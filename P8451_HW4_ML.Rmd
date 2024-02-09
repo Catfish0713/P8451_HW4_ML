@@ -1,0 +1,141 @@
+---
+title: "P8451_HW4_ML"
+author: "Ruixi Li"
+date: "2024-02-07"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+
+# Part I: Implementing a Simple Prediction Pipeline
+
+The New York City Department of Health administered a questionnaire on general health and physical activity among residents. Using the dataset class4_p1.csv, fit and evaluate two prediction models using **linear regression**. The aim of the models are to predict the number of days in a month an individual reported having good physical health (feature name: **healthydays**). A codebook is provided so you can look-up the meaning and values of each feature in the dataset. (Note the codebook lists information on features that are not included in your dataset).
+
+Your analytic pipeline should include the following:
+
+## 1. Data Cleaning
+
+```{r load_packages}
+library(ggbiplot)
+library(caret)
+```
+
+
+```{r }
+library(tidyverse)
+# Read data
+hw4data = read_csv("class4_p1.csv")
+set.seed(111)
+
+# View the datatypes and summary statistics of the whole dataset
+skimr::skim(hw4data)
+
+# Rename and datatype conversion
+var.names <- c("id", "hypertension", "diabetes", "asthma", "bmi", "tobacco", "alcohol", "pa_chores_min", "pa_walk_day", "pa_self", "diet", "agegrp", "gender", "race","nationality", "fincome", "healthyday")
+hw4data = hw4data |>
+  set_names(var.names) |>
+  mutate(across(-c(5,8,9,17), function(x) as.factor(x)))
+
+hw4data |> Amelia::missmap(main = "Missing values vs observed")
+
+hw4data = hw4data|> 
+  drop_na()# it's necessary to make sure that directly drop NAs won't cause bias
+
+
+# Finding correlated predictors
+# 1. continuous and continuous
+cont = hw4data %>%
+  select_if(is.numeric)
+correlations1 <- cor(cont, use = "complete.obs")
+high.correlations <- findCorrelation(correlations1, cutoff = 0.4) |> print()
+# There's no high correlations between continuous and continuous variables.
+
+# 2.categorical and categorical 
+library(rcompanion)
+cate = hw4data |>
+  select_if(is.factor) |> 
+  select(-id) |> mutate_all(function(x) as.numeric(x)) |> as.matrix()
+skimr::skim(cate) # there's no cell < 5, so chi-squared test is applicable
+
+cramerV(cate)
+cate
+
+
+
+
+
+```
+
+# 2. Data partition
+
+```{r data_partition}
+# Creating balanced partitions in the data
+train.index <- createDataPartition(hw4data$healthyday, p = 0.7, list = FALSE)
+
+hcvdat.train <- hw4data[train.index, ]
+hcvdat.test <- hw4data[-train.index, ]
+
+# Construct k-folds in your data
+train.folds <- createFolds(hw4data$healthyday, k = 10, list = FALSE)
+```
+
+# 3. Fit two models
+
+There are lots of methods to fit my models. I have thought about using lasso/ridge regression to do the auto-selection of predictors and handle multicollinearity. But before I do lasso/ridge regression, I need to standardize my features, which are mostly categorical variables. Standardization for nominal categorical data is different from that for continuous variable. One-hot encoding may takes too much time and it's not that plausible to do that here. So I decided to fit my linear model "statistically" and based on my knowledge.
+
+```{r}
+# Conducting the bivariate analysis for model building
+
+outcome <- "healthyday"
+predictors <- c("hypertension", "diabetes", "asthma", "bmi", "tobacco", "alcohol", "pa_chores_min", "pa_walk_day", "pa_self", "diet", "agegrp", "gender", "race", "nationality", "fincome")
+
+bivariate_results <- list()
+
+for (predictor in predictors) {
+  formula <- as.formula(paste(outcome, "~", predictor))
+  model <- lm(formula, data=hw4data) 
+  bivariate_results[[predictor]] <- summary(model)$coefficients
+}
+
+
+# Start with an intercept-only model
+current_model <- lm(healthyday ~ 1, data=hw4data) 
+
+# Iteratively add variables based on LRT
+for (predictor in predictors) {
+  new_model_formula <- as.formula(paste("healthyday ~", paste(c(attr(current_model$formula, "rhs"), predictor), collapse = "+")))
+  new_model <- lm(new_model_formula, data=hw4data) 
+  
+  # Perform Likelihood Ratio Test
+  lr_test <- anova(current_model, new_model, test="Chisq")
+  
+  # Check if the p-value of the LRT is significant
+  if (lr_test$`Pr(>Chi)`[2] < 0.05) { 
+    current_model <- new_model
+    cat("Added", predictor, "to the model\n")
+  } else {
+    cat(predictor, "not added\n")
+  }
+}
+
+# Final model after adding all significant predictors
+summary(current_model)
+
+
+```
+
+### Model Evaluation
+
+```{r}
+test.outcome <- hcvdat.test %>%
+  select(-outcome.class) %>%
+  mutate(predicted = predict(lasso.3, newdata = .))
+
+confusionMatrix(test.outcome$predicted, hcvdat.test$outcome.class, positive = "LiverDisease")
+
+```
+
