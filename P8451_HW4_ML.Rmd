@@ -19,7 +19,7 @@ Your analytic pipeline should include the following:
 
 ## 1. Data Cleaning
 
-```{r load_packages, echo=FALSE}
+```{r load_packages, message=FALSE, warning=FALSE}
 library(ggbiplot)
 library(caret)
 ```
@@ -125,9 +125,10 @@ Using the dataset from the Group assignment Part 3 (USArrests), identify cluster
 
 ## 6. Hierarchical clustering analysis
 
-```{r}
+```{r hierarchical_clustering, message=FALSE}
 library(factoextra)
 library(cluster)
+
 # Load data
 data("USArrests")
 
@@ -153,10 +154,10 @@ transformed.vals = predict(set.up.preprocess, USArrests)
 
 
 
-set.seed(111)
+set.seed(123)
 
 # Hierarchical clustering using Complete Linkage, 
-clusters.hcut=hcut(transformed.vals, k=4, hc_func="hclust", hc_method="complete", hc_metric="euclidian")
+clusters.hcut=hcut(transformed.vals, k=4, hc_func="hclust", hc_method="complete", hc_metric="euclidian")# k=2 or k=4
 
 clusters.hcut$size
 
@@ -189,12 +190,22 @@ input.feature.vals |>
   summarise_all(mean)
 ```
 
-* 
+* Cluster 1: This cluster is marked by above-average values in all categories except UrbanPop, which is close to average (z-score of -0.832). It suggests states with higher crime rates and moderately smaller urban populations.
+
+* Cluster 2: States in this cluster have all features above the average,especially Assault and Rape rates. This cluster might represent states with high crime rates and large urban populations.
+
+* Cluster 3: The negative z-scores for Murder, Assault, and Rape indicate that these areas have lower than average rates of these crimes. The UrbanPop is slightly above average, meaning these areas might have moderately sized urban populations but high crime rates.
+
+* Cluster 4: This cluster is characterized by below-average values for all features (Murder, Assault, UrbanPop, Rape), as indicated by the negative z-scores. This suggests that states falling into this cluster have lower than average crime rates and urban population.
+
 
 ## 9. Research Questions
 
+* Research question: Is the level of utilization(represented by 'UrbanPop' feature in this dataset) associated with the crime rate(measured by 'Murder', 'Assualt' and 'Rape' features in this dataset) across state?
 
+* Scientific consideration: We should figure out which linkage method to use and how many clusters to have based on the nature of data.
 
+* Ethical consideration:We should avoid drawing conclusions that could stigmatize certain regions or communities.
 
 ## 10. Repeat analysis with different parameters
 
@@ -213,6 +224,15 @@ input.feature.vals<-cbind(transformed.vals,cluster=clusters.hcut$cluster)
 input.feature.vals %>%
   group_by(cluster) %>%
   summarise_all(mean)
+
+transformed.vals|>
+  ggplot(aes(y=Rape))+ geom_boxplot()
+
 ```
 
-* Yes, the cluster changed.
+* Yes, the clusters changed. For my research question, I want to find tightly knit clusters and the data contains outliers(in Rape), so compared with 'single' I think 'complete' is better.
+
+
+
+
+
