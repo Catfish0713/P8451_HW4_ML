@@ -177,7 +177,7 @@ fviz_cluster(clusters.hcut)
 gap_stat = clusGap(transformed.vals, FUN = hcut, hc_method="complete", K.max = 10, B = 50)
 fviz_gap_stat(gap_stat)
 ```
-
+* Although the graph chose the optimal cluster number as 2, the gap statistics increases when moving k=3 to k=4, and constantly decreases when k becomes bigger,despite a slight decrease, indicating that k=4 is the optimal number.
 
 ## 8. Describe the composition of each cluster
 
@@ -230,7 +230,7 @@ transformed.vals|>
 
 ```
 
-* Yes, the clusters changed. For my research question, I want to find tightly knit clusters and the data contains outliers(in Rape), so compared with 'single' I think 'complete' is better.
+* Yes, the clusters changed. For my research question, I want to find tightly knit clusters and the data contains outliers(in Rape), so compared with 'single' I think 'complete' is better. The gap statistic graph also shows an obvious 'elbow' at k=4(compared with using 'single' method). Changing set seeds didn't change the clusters a lot,indicating that the data has a strong inherent tighter clustering structure. 
 
 
 
