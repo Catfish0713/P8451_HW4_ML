@@ -2,7 +2,7 @@
 title: "P8451_HW4_ML"
 author: "Ruixi Li"
 date: "2024-02-07"
-output: html_document
+output: word_document
 ---
 
 ```{r setup, include=FALSE}
@@ -22,6 +22,7 @@ Your analytic pipeline should include the following:
 ```{r load_packages, message=FALSE, warning=FALSE}
 library(ggbiplot)
 library(caret)
+library(gtsummary)
 ```
 
 
@@ -29,13 +30,14 @@ library(caret)
 library(tidyverse)
 # Read data
 hw4data = read_csv("class4_p1.csv")
-set.seed(111)
+set.seed(123)
 
 # View the datatypes and summary statistics of the whole dataset
 skimr::skim(hw4data)
 
 # Rename and datatype conversion
 var.names = c("id", "hypertension", "diabetes", "asthma", "bmi", "tobacco", "alcohol", "pa_chores_min", "pa_walk_day", "pa_self", "diet", "agegrp", "gender", "race","nationality", "fincome", "healthyday")
+
 hw4data = hw4data |>
   set_names(var.names) |>
   mutate(across(-c(5,8,9,17), function(x) as.factor(x)))
@@ -68,15 +70,66 @@ test = hw4data[-train.index, ]
 There are lots of methods to fit my models. I have thought about using lasso regression to do the auto-selection of predictors and handle multicollinearity. But lasso regression doesn't work well with categorical variables in terms of both feature selection and prediction accuracy. It needs One-hot encoding of the categorical data and ignore the grouping effect. However, group lasso may be a good alternative for robust feature selection although at the cost of prediction accuracy. (Lack of Robustness of Lasso and Group Lasso with Categorical Predictors: Impact of Coding
 Strategy on Variable Selection and Prediction https://escholarship.org/content/qt40b200z6/qt40b200z6_noSplash_c3819f1c49cdc6380c6ae5b0ac0af41d.pdf?t=qaj586) 
 
-Here, I would build the two models based on my knowledge.
+Here, I would build the two models based on my knowledge. I built my model2 from scratch manually. But actually, model builded using the whole dataset might lead to increased risk of overfitting of the trained model.
+
+
+```{r manually_model_building, message=FALSE, warning=FALSE}
+# Conducting the bivariate analysis for model building
+
+outcome <- "healthyday"
+predictors <- c("hypertension", "diabetes", "asthma", "bmi", "tobacco", "alcohol", "pa_chores_min", "pa_walk_day", "pa_self", "diet", "agegrp", "gender", "race", "nationality", "fincome")
+
+bivariate_results <- list()
+
+for (predictor in predictors) {
+  formula <- as.formula(paste(outcome, "~", predictor))
+  model <- lm(formula, data=hw4data) 
+  bivariate_results[[predictor]] <- summary(model)$coefficients
+}
+
+
+# Start with an intercept-only model
+current_model <- lm(healthyday ~ 1, data=hw4data) 
+
+# Iteratively add variables based on LRT
+for (predictor in predictors) {
+  new_model_formula <- update(formula(current_model), paste(". ~ . +", predictor))
+  new_model <- lm(new_model_formula, data=hw4data) 
+  
+  # Perform Likelihood Ratio Test
+  lr_test <- anova(current_model, new_model)
+  
+  # Extract the last p-value (corresponding to the addition of the new predictor)
+  p_value <- lr_test$`Pr(>F)`[nrow(lr_test)]
+  
+  # Check if the p-value exists and is significant
+  if (!is.na(p_value) && p_value < 0.05) {
+    current_model <- new_model  # Update the model to include the new predictor
+    cat("Added", predictor, "to the model\n")
+  } else {
+    cat(predictor, "not added\n")
+  }
+}
+  
+  
+  # Final model after adding all significant predictors
+  model1 = lm(healthyday ~ hypertension + pa_walk_day, data = hw4data)
+  model2 = current_model
+  
+```
+
+
 
 ```{r model_training}
-# Avoid overfitting
+# Avoid overfitting through cross validation
 control = trainControl(method="repeatedcv", number=10, repeats=10, summaryFunction=defaultSummary)
 
 # Train models
 model1_train = train(healthyday ~ hypertension + pa_walk_day, data = train, method = "lm", trControl = control)
 model2_train = train(healthyday ~ hypertension + diabetes + asthma + alcohol + pa_walk_day + pa_self + diet + agegrp + race + fincome, data = train, method = "lm", trControl = control)
+
+model1_train$finalModel |> tbl_regression()
+model2_train$finalModel |> tbl_regression()
 ```
 
 * model1: healthyday ~ hypertension + pa_walk_day
@@ -91,8 +144,8 @@ predictions1 = predict(model1_train, test)
 predictions2 = predict(model2_train, test)
 
 # Evaluation using Mean Squared Error (MSE)
-mse1 = mean((predictions1 - test$healthyday)**2/nrow(test))
-mse2 = mean((predictions2 - test$healthyday)**2/nrow(test))
+mse1 = mean((predictions1 - test$healthyday)**2/nrow(test)) 
+mse2 = mean((predictions2 - test$healthyday)**2/nrow(test)) 
 
 model1_result = bind_rows(train = predictions1, test = test$healthyday, .id = "split")
 model2_result = bind_rows(train = predictions2, test = test$healthyday, .id = "split")
@@ -177,6 +230,7 @@ fviz_cluster(clusters.hcut)
 gap_stat = clusGap(transformed.vals, FUN = hcut, hc_method="complete", K.max = 10, B = 50)
 fviz_gap_stat(gap_stat)
 ```
+
 * Although the graph chose the optimal cluster number as 2, the gap statistics increases when moving k=3 to k=4, and constantly decreases when k becomes bigger,despite a slight decrease, indicating that k=4 is the optimal number.
 
 ## 8. Describe the composition of each cluster
@@ -187,7 +241,8 @@ input.feature.vals=cbind(transformed.vals,cluster=clusters.hcut$cluster)
 
 input.feature.vals |>
   group_by(cluster) |>
-  summarise_all(mean)
+  summarise_all(mean) |>
+  knitr::kable()
 ```
 
 * Cluster 1: This cluster is marked by above-average values in all categories except UrbanPop, which is close to average (z-score of -0.832). It suggests states with higher crime rates and moderately smaller urban populations.
@@ -210,7 +265,7 @@ input.feature.vals |>
 ## 10. Repeat analysis with different parameters
 
 ```{r}
-clusters.hcut<-hcut(transformed.vals, k=4, hc_func="hclust", hc_method="single", hc_metric="euclidian")
+clusters.hcut<-hcut(transformed.vals, k=5, hc_func="hclust", hc_method="single", hc_metric="euclidian")
 
 clusters.hcut$size
 fviz_dend(clusters.hcut, rect=TRUE)
@@ -230,7 +285,7 @@ transformed.vals|>
 
 ```
 
-* Yes, the clusters changed. For my research question, I want to find tightly knit clusters and the data contains outliers(in Rape), so compared with 'single' I think 'complete' is better. The gap statistic graph also shows an obvious 'elbow' at k=4(compared with using 'single' method). Changing set seeds didn't change the clusters a lot,indicating that the data has a strong inherent tighter clustering structure. 
+* Yes, the clusters changed. For my research question, I want to find tightly knit clusters and the data contains outliers(in Rape), so compared with 'single' I think 'complete' is better(using single linkage, some cluster has only one state). The gap statistic graph also shows an obvious 'elbow' at k=4(compared with using 'single' method). Changing set seeds didn't change the clusters a lot,indicating that the data has a strong inherent tighter clustering structure. 
 
 
 
