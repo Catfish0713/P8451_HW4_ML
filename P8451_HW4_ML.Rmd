@@ -23,6 +23,7 @@ Your analytic pipeline should include the following:
 library(ggbiplot)
 library(caret)
 library(gtsummary)
+library(MASS)
 ```
 
 
@@ -70,10 +71,11 @@ test = hw4data[-train.index, ]
 There are lots of methods to fit my models. I have thought about using lasso regression to do the auto-selection of predictors and handle multicollinearity. But lasso regression doesn't work well with categorical variables in terms of both feature selection and prediction accuracy. It needs One-hot encoding of the categorical data and ignore the grouping effect. However, group lasso may be a good alternative for robust feature selection although at the cost of prediction accuracy. (Lack of Robustness of Lasso and Group Lasso with Categorical Predictors: Impact of Coding
 Strategy on Variable Selection and Prediction https://escholarship.org/content/qt40b200z6/qt40b200z6_noSplash_c3819f1c49cdc6380c6ae5b0ac0af41d.pdf?t=qaj586) 
 
-Here, I would build the two models based on my knowledge. I built my model2 from scratch manually. But actually, model builded using the whole dataset might lead to increased risk of overfitting of the trained model.
+Here, I would build the model1 based on my knowledge. I built my model2 by add predictors manually. 
 
+```{r model_fit}
+model1 = lm(healthyday ~ hypertension + agegrp + asthma + fincome, data = train)
 
-```{r manually_model_building, message=FALSE, warning=FALSE}
 # Conducting the bivariate analysis for model building
 
 outcome <- "healthyday"
@@ -113,26 +115,24 @@ for (predictor in predictors) {
   
   
   # Final model after adding all significant predictors
-  model1 = lm(healthyday ~ hypertension + pa_walk_day, data = hw4data)
-  model2 = current_model
   
+model2 = current_model
+
 ```
-
-
 
 ```{r model_training}
 # Avoid overfitting through cross validation
 control = trainControl(method="repeatedcv", number=10, repeats=10, summaryFunction=defaultSummary)
 
 # Train models
-model1_train = train(healthyday ~ hypertension + pa_walk_day, data = train, method = "lm", trControl = control)
+model1_train = train(healthyday ~ hypertension + agegrp + asthma + fincome, data = train, method = "lm", trControl = control)
 model2_train = train(healthyday ~ hypertension + diabetes + asthma + alcohol + pa_walk_day + pa_self + diet + agegrp + race + fincome, data = train, method = "lm", trControl = control)
 
 model1_train$finalModel |> tbl_regression()
 model2_train$finalModel |> tbl_regression()
 ```
 
-* model1: healthyday ~ hypertension + pa_walk_day
+* model1: healthyday ~ hypertension + agegrp + asthma + fincome
 * model2: healthyday ~ hypertension + diabetes + asthma + alcohol + pa_walk_day + 
     pa_self + diet + agegrp + race + fincome
 
@@ -143,31 +143,22 @@ model2_train$finalModel |> tbl_regression()
 predictions1 = predict(model1_train, test)
 predictions2 = predict(model2_train, test)
 
-# Evaluation using Mean Squared Error (MSE)
-mse1 = mean((predictions1 - test$healthyday)**2/nrow(test)) 
-mse2 = mean((predictions2 - test$healthyday)**2/nrow(test)) 
-
-model1_result = bind_rows(train = predictions1, test = test$healthyday, .id = "split")
-model2_result = bind_rows(train = predictions2, test = test$healthyday, .id = "split")
-result = bind_rows(model1 = model1_result, model2 = model2_result, .id = "model")
+# Evaluation using RMSE and R2
 
 
-result = result |> 
-  mutate(residual = train - test)
-
-result |> 
-  ggplot(aes(x = model, y = residual)) + geom_violin()
-
+rmse1 = RMSE(predictions1, test$healthyday)
+rmse2 = RMSE(predictions2, test$healthyday)
+r2_1=R2(predictions1, test$healthyday)
+r2_2=R2(predictions2, test$healthyday)
 
 
 ```
 
-* Mean squared error (MSE) for model1(`r mse1`)< model2(`r mse2`), and the residual plot shows that both models have residuals that center around zero, which is good. The spread of the residuals (the range from top to bottom of the violin) seems similar for both models, suggesting that they have a similar variance in their predictions. However, it looks like Model 2 might have a slightly tighter distribution, indicating more consistent predictions. So, model2 is the preferred prediction model using MSE evaluation.
+* RMSE for model1(`r rmse1`) > model2(`r rmse2`),R2 for model1(`r r2_1`) < model2(`r r2_2`). So, model1 is the preferred prediction model using RMSE and R2 evaluation.
 
 ## 5. Implementing setting
 
-My final model: healthyday ~ hypertension + diabetes + asthma + alcohol + pa_walk_day + 
-    pa_self + diet + agegrp + race + fincome can be used to predict the number of days in a month an individual reported having good physical health through a comprehensive evaluation of medical conditions, life habits and socioeconomic factors. This insight can guide targeted health interventions and resource allocation to improve the general well-being of the population in NYC.
+My final model: 'healthyday ~ hypertension + agegrp + asthma + fincome' can be used to predict the number of days in a month an individual reported having good physical health through a combination of medical status(hypertension, asthma), age and the family income. Looking at the estimates of model 1, having no diseases, being in a younger age group and higher family income can increase healthydays. This insight can guide targeted health interventions(focus on chronic diseases like hypertension and asthma) and resource allocation(to poor people) to improve the general well-being of the population in NYC.
 
 
 
